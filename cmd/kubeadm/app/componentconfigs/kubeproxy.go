@@ -17,13 +17,12 @@ limitations under the License.
 package componentconfigs
 
 import (
-	"net"
-
 	clientset "k8s.io/client-go/kubernetes"
 	kubeproxyconfig "k8s.io/kube-proxy/config/v1alpha1"
+	netutils "k8s.io/utils/net"
 
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
-	kubeadmapiv1beta2 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta2"
+	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	"k8s.io/kubernetes/cmd/kubeadm/app/features"
 )
@@ -76,11 +75,11 @@ func (kp *kubeProxyConfig) Unmarshal(docmap kubeadmapi.DocumentMap) error {
 }
 
 func kubeProxyDefaultBindAddress(localAdvertiseAddress string) string {
-	ip := net.ParseIP(localAdvertiseAddress)
+	ip := netutils.ParseIPSloppy(localAdvertiseAddress)
 	if ip.To4() != nil {
-		return kubeadmapiv1beta2.DefaultProxyBindAddressv4
+		return kubeadmapiv1.DefaultProxyBindAddressv4
 	}
-	return kubeadmapiv1beta2.DefaultProxyBindAddressv6
+	return kubeadmapiv1.DefaultProxyBindAddressv6
 }
 
 func (kp *kubeProxyConfig) Get() interface{} {

@@ -21,10 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/clock"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/record"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
@@ -35,6 +34,7 @@ import (
 	evictionapi "k8s.io/kubernetes/pkg/kubelet/eviction/api"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	kubelettypes "k8s.io/kubernetes/pkg/kubelet/types"
+	testingclock "k8s.io/utils/clock/testing"
 )
 
 const (
@@ -46,14 +46,16 @@ const (
 // mockPodKiller is used to testing which pod is killed
 type mockPodKiller struct {
 	pod                 *v1.Pod
-	status              v1.PodStatus
+	evict               bool
+	statusFn            func(*v1.PodStatus)
 	gracePeriodOverride *int64
 }
 
 // killPodNow records the pod that was killed
-func (m *mockPodKiller) killPodNow(pod *v1.Pod, status v1.PodStatus, gracePeriodOverride *int64) error {
+func (m *mockPodKiller) killPodNow(pod *v1.Pod, evict bool, gracePeriodOverride *int64, statusFn func(*v1.PodStatus)) error {
 	m.pod = pod
-	m.status = status
+	m.statusFn = statusFn
+	m.evict = evict
 	m.gracePeriodOverride = gracePeriodOverride
 	return nil
 }
@@ -204,7 +206,7 @@ func TestMemoryPressure(t *testing.T) {
 		return pods
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}
@@ -469,7 +471,7 @@ func TestDiskPressureNodeFs(t *testing.T) {
 		return pods
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}
@@ -666,7 +668,7 @@ func TestMinReclaim(t *testing.T) {
 		return pods
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}
@@ -806,7 +808,7 @@ func TestNodeReclaimFuncs(t *testing.T) {
 		return pods
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	nodeRef := &v1.ObjectReference{Kind: "Node", Name: "test", UID: types.UID("test"), Namespace: ""}
@@ -875,6 +877,51 @@ func TestNodeReclaimFuncs(t *testing.T) {
 	// reset state
 	diskGC.imageGCInvoked = false
 	diskGC.containerGCInvoked = false
+
+	// remove disk pressure
+	fakeClock.Step(20 * time.Minute)
+	summaryProvider.result = summaryStatsMaker("16Gi", "200Gi", podStats)
+	manager.synchronize(diskInfoProvider, activePodsFunc)
+
+	// we should not have disk pressure
+	if manager.IsUnderDiskPressure() {
+		t.Errorf("Manager should not report disk pressure")
+	}
+
+	// synchronize
+	manager.synchronize(diskInfoProvider, activePodsFunc)
+
+	// we should not have disk pressure
+	if manager.IsUnderDiskPressure() {
+		t.Errorf("Manager should not report disk pressure")
+	}
+
+	// induce hard threshold
+	fakeClock.Step(1 * time.Minute)
+	summaryProvider.result = summaryStatsMaker(".9Gi", "200Gi", podStats)
+	// make GC return disk usage bellow the threshold, but not satisfying minReclaim
+	diskGC.summaryAfterGC = summaryStatsMaker("1.1Gi", "200Gi", podStats)
+	manager.synchronize(diskInfoProvider, activePodsFunc)
+
+	// we should have disk pressure
+	if !manager.IsUnderDiskPressure() {
+		t.Errorf("Manager should report disk pressure since soft threshold was met")
+	}
+
+	// verify image gc was invoked
+	if !diskGC.imageGCInvoked || !diskGC.containerGCInvoked {
+		t.Errorf("Manager should have invoked image gc")
+	}
+
+	// verify a pod was killed because image gc was not enough to satisfy minReclaim
+	if podKiller.pod == nil {
+		t.Errorf("Manager should have killed a pod, but didn't")
+	}
+
+	// reset state
+	diskGC.imageGCInvoked = false
+	diskGC.containerGCInvoked = false
+	podKiller.pod = nil
 
 	// remove disk pressure
 	fakeClock.Step(20 * time.Minute)
@@ -1005,7 +1052,7 @@ func TestInodePressureNodeFsInodes(t *testing.T) {
 		return pods
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}
@@ -1212,7 +1259,7 @@ func TestStaticCriticalPodsAreNotEvicted(t *testing.T) {
 		return mirrorPod, true
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}
@@ -1338,7 +1385,7 @@ func TestAllocatableMemoryPressure(t *testing.T) {
 		return pods
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}
@@ -1482,7 +1529,7 @@ func TestUpdateMemcgThreshold(t *testing.T) {
 		return []*v1.Pod{}
 	}
 
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testingclock.NewFakeClock(time.Now())
 	podKiller := &mockPodKiller{}
 	diskInfoProvider := &mockDiskInfoProvider{dedicatedImageFs: false}
 	diskGC := &mockDiskGC{err: nil}

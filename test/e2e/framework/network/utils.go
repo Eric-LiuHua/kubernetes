@@ -51,7 +51,7 @@ import (
 
 const (
 	// EndpointHTTPPort is an endpoint HTTP port for testing.
-	EndpointHTTPPort = 8080
+	EndpointHTTPPort = 8083
 	// EndpointUDPPort is an endpoint UDP port for testing.
 	EndpointUDPPort = 8081
 	// EndpointSCTPPort is an endpoint SCTP port for testing.
@@ -900,8 +900,8 @@ func (config *NetworkingTestConfig) getServiceClient() coreclientset.ServiceInte
 
 // HTTPPokeParams is a struct for HTTP poke parameters.
 type HTTPPokeParams struct {
-	Timeout        time.Duration
-	ExpectCode     int // default = 200
+	Timeout        time.Duration // default = 10 secs
+	ExpectCode     int           // default = 200
 	BodyContains   string
 	RetriableCodes []int
 	EnableHTTPS    bool
@@ -979,6 +979,10 @@ func PokeHTTP(host string, port int, path string, params *HTTPPokeParams) HTTPPo
 
 	if params.ExpectCode == 0 {
 		params.ExpectCode = http.StatusOK
+	}
+
+	if params.Timeout == 0 {
+		params.Timeout = 10 * time.Second
 	}
 
 	framework.Logf("Poking %q", url)

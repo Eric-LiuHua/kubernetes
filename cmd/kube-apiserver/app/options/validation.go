@@ -113,7 +113,7 @@ func validateTokenRequest(options *ServerRunOptions) []error {
 	var errs []error
 
 	enableAttempted := options.ServiceAccountSigningKeyFile != "" ||
-		options.Authentication.ServiceAccounts.Issuer != "" ||
+		(len(options.Authentication.ServiceAccounts.Issuers) != 0 && options.Authentication.ServiceAccounts.Issuers[0] != "") ||
 		len(options.Authentication.APIAudiences) != 0
 
 	enableSucceeded := options.ServiceAccountIssuer != nil
@@ -134,7 +134,7 @@ func validateAPIPriorityAndFairness(options *ServerRunOptions) []error {
 		// If none of the following runtime config options are specified, APF is
 		// assumed to be turned on.
 		enabledAPIString := options.APIEnablement.RuntimeConfig.String()
-		testConfigs := []string{"flowcontrol.apiserver.k8s.io/v1beta1", "api/beta", "api/all"} // in the order of precedence
+		testConfigs := []string{"flowcontrol.apiserver.k8s.io/v1beta2", "flowcontrol.apiserver.k8s.io/v1beta1", "api/beta", "api/all"} // in the order of precedence
 		for _, testConfig := range testConfigs {
 			if strings.Contains(enabledAPIString, fmt.Sprintf("%s=false", testConfig)) {
 				return []error{fmt.Errorf("--runtime-config=%s=false conflicts with --enable-priority-and-fairness=true and --feature-gates=APIPriorityAndFairness=true", testConfig)}

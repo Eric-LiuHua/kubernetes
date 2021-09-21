@@ -85,7 +85,7 @@ func NewPVCProtectionController(pvcInformer coreinformers.PersistentVolumeClaimI
 	e.podListerSynced = podInformer.Informer().HasSynced
 	e.podIndexer = podInformer.Informer().GetIndexer()
 	if err := common.AddIndexerIfNotPresent(e.podIndexer, common.PodPVCIndex, common.PodPVCIndexFunc(genericEphemeralVolumeFeatureEnabled)); err != nil {
-		return nil, fmt.Errorf("Could not initialize pvc protection controller: %v", err)
+		return nil, fmt.Errorf("could not initialize pvc protection controller: %w", err)
 	}
 	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -350,7 +350,7 @@ func (c *Controller) pvcAddedUpdated(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for Persistent Volume Claim %#v: %v", pvc, err))
 		return
 	}
-	klog.V(4).InfoS("Got event on PVC", key)
+	klog.V(4).InfoS("Got event on PVC", "pvc", klog.KObj(pvc))
 
 	if protectionutil.NeedToAddFinalizer(pvc, volumeutil.PVCProtectionFinalizer) || protectionutil.IsDeletionCandidate(pvc, volumeutil.PVCProtectionFinalizer) {
 		c.queue.Add(key)

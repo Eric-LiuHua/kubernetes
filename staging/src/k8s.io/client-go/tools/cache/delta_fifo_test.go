@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -541,6 +542,11 @@ func TestDeltaFIFO_detectLineJumpers(t *testing.T) {
 func TestDeltaFIFO_addIfNotPresent(t *testing.T) {
 	f := NewDeltaFIFOWithOptions(DeltaFIFOOptions{KeyFunction: testFifoObjectKeyFunc})
 
+	emptyDeltas := Deltas{}
+	if err := f.AddIfNotPresent(emptyDeltas); err == nil || !errors.Is(err, ErrZeroLengthDeltasObject) {
+		t.Errorf("Expected error '%v', got %v", ErrZeroLengthDeltasObject, err)
+	}
+
 	f.Add(mkFifoObj("b", 3))
 	b3 := Pop(f)
 	f.Add(mkFifoObj("c", 4))
@@ -687,4 +693,24 @@ func TestDeltaFIFO_PopShouldUnblockWhenClosed(t *testing.T) {
 			t.Fatalf("timed out waiting for Pop to return after Close")
 		}
 	}
+}
+
+func BenchmarkDeltaFIFOListKeys(b *testing.B) {
+	f := NewDeltaFIFOWithOptions(DeltaFIFOOptions{KeyFunction: testFifoObjectKeyFunc})
+	const amount = 10000
+
+	for i := 0; i < amount; i++ {
+		f.Add(mkFifoObj(string([]rune{'a', rune(i)}), i+1))
+	}
+	for u := uint64(0); u < amount; u++ {
+		f.Add(mkFifoObj(string([]rune{'b', rune(u)}), u+1))
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = f.ListKeys()
+		}
+	})
+	b.StopTimer()
 }

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strings"
-	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -148,19 +147,7 @@ func (tpd *testPodData) createPodsForTest(f *framework.Framework, podReqs []podD
 
 /* deletePodsForTest clean up all the pods run for a testcase. Must ensure proper cleanup */
 func (tpd *testPodData) deletePodsForTest(f *framework.Framework) {
-	podNS := f.Namespace.Name
-	var wg sync.WaitGroup
-	for podName := range tpd.PodMap {
-		wg.Add(1)
-		go func(podName string) {
-			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
-
-			deletePodSyncByName(f, podName)
-			waitForAllContainerRemoval(podName, podNS)
-		}(podName)
-	}
-	wg.Wait()
+	deletePodsAsync(f, tpd.PodMap)
 }
 
 /* deletePod removes pod during a test. Should do a best-effort clean up */
@@ -503,9 +490,8 @@ var _ = SIGDescribe("POD Resources [Serial] [Feature:PodResources][NodeFeature:P
 			if cpuAlloc < minCoreCount {
 				e2eskipper.Skipf("Skipping CPU Manager tests since the CPU allocatable < %d", minCoreCount)
 			}
-			if sriovdevCount, err := countSRIOVDevices(); err != nil || sriovdevCount == 0 {
-				e2eskipper.Skipf("this test is meant to run on a system with at least one configured VF from SRIOV device")
-			}
+
+			requireSRIOVDevices()
 
 			onlineCPUs, err := getOnlineCPUs()
 			framework.ExpectNoError(err)
@@ -545,9 +531,7 @@ var _ = SIGDescribe("POD Resources [Serial] [Feature:PodResources][NodeFeature:P
 		ginkgo.It("should return the expected responses with cpumanager none policy", func() {
 			// current default is "none" policy - no need to restart the kubelet
 
-			if sriovdevCount, err := countSRIOVDevices(); err != nil || sriovdevCount == 0 {
-				e2eskipper.Skipf("this test is meant to run on a system with at least one configured VF from SRIOV device")
-			}
+			requireSRIOVDevices()
 
 			oldCfg := enablePodResourcesFeatureGateInKubelet(f)
 			defer func() {
@@ -588,9 +572,8 @@ var _ = SIGDescribe("POD Resources [Serial] [Feature:PodResources][NodeFeature:P
 			if cpuAlloc < minCoreCount {
 				e2eskipper.Skipf("Skipping CPU Manager tests since the CPU allocatable < %d", minCoreCount)
 			}
-			if sriovdevCount, err := countSRIOVDevices(); err != nil || sriovdevCount > 0 {
-				e2eskipper.Skipf("this test is meant to run on a system with no configured VF from SRIOV device")
-			}
+
+			requireLackOfSRIOVDevices()
 
 			onlineCPUs, err := getOnlineCPUs()
 			framework.ExpectNoError(err)
@@ -619,9 +602,7 @@ var _ = SIGDescribe("POD Resources [Serial] [Feature:PodResources][NodeFeature:P
 		ginkgo.It("should return the expected responses with cpumanager none policy", func() {
 			// current default is "none" policy - no need to restart the kubelet
 
-			if sriovdevCount, err := countSRIOVDevices(); err != nil || sriovdevCount > 0 {
-				e2eskipper.Skipf("this test is meant to run on a system with no configured VF from SRIOV device")
-			}
+			requireLackOfSRIOVDevices()
 
 			oldCfg := enablePodResourcesFeatureGateInKubelet(f)
 			defer func() {
@@ -663,6 +644,12 @@ var _ = SIGDescribe("POD Resources [Serial] [Feature:PodResources][NodeFeature:P
 
 	})
 })
+
+func requireLackOfSRIOVDevices() {
+	if sriovdevCount, err := countSRIOVDevices(); err != nil || sriovdevCount > 0 {
+		e2eskipper.Skipf("this test is meant to run on a system with no configured VF from SRIOV device")
+	}
+}
 
 func getOnlineCPUs() (cpuset.CPUSet, error) {
 	onlineCPUList, err := ioutil.ReadFile("/sys/devices/system/cpu/online")

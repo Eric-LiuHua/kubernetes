@@ -1,3 +1,4 @@
+//go:build !providerless
 // +build !providerless
 
 /*
@@ -198,6 +199,11 @@ func (ss *scaleSet) newVMSSVirtualMachinesCache(resourceGroupName, vmssName, cac
 			}
 
 			computerName := strings.ToLower(*vm.OsProfile.ComputerName)
+			if vm.NetworkProfile == nil || vm.NetworkProfile.NetworkInterfaces == nil {
+				klog.Warningf("skip caching vmssVM %s since its network profile hasn't initialized yet (probably still under creating)", computerName)
+				continue
+			}
+
 			vmssVMCacheEntry := &vmssVirtualMachinesEntry{
 				resourceGroup:  resourceGroupName,
 				vmssName:       vmssName,
